@@ -8,6 +8,10 @@ import shutil
 import unicodedata
 from pathlib import Path
 from urllib.parse import quote, urlsplit, urlunsplit
+from catalog_metadata import (
+    catalog_sources, load_catalog_metadata, read_json, read_snapshot,
+    recommendation_state, validate_pointer,
+)
 
 THEME = Path(__file__).resolve().parent
 FAMILY = json.loads((THEME / 'family.json').read_text())
@@ -102,11 +106,11 @@ def overview(config, args):
       <ol class="numbered"><li><h3>Put the capability in a library.</h3><p>Expose every useful operation through the library. Add genuine model-backed work alongside deterministic paths that load and run without a provider.</p>{link(SPEC+'structure.html','Library structure','text-link')}</li>
       <li><h3>Describe it where the code lives.</h3><p>Ship one SMART_TOOL.md manifest with the name, purpose, platforms, and prerequisites. Add library-owned usage guidance and capability help.</p>{link(SPEC+'manifest.html','Manifest format','text-link')}</li>
       <li><h3>Add the CLI and package it.</h3><p>Keep argument parsing and I/O in a thin CLI. Support installation from Git, and provide a smart-tool.json descriptor at the distribution root.</p>{link(SPEC+'packaging.html','Packaging and installation','text-link')}</li>
-      <li><h3>Check the format. Prove the work.</h3><p>Run the conformance kit against the distribution. Test the actual capabilities separately, then follow the catalog contribution guide to make the tool discoverable.</p>{link(repo_url('overview')+'/tree/main/conformance','Conformance kit','text-link')}</li></ol>
+      <li><h3>Tell format checks from task results.</h3><p>A conformance check addresses format. Task-specific checks can answer separate questions about behavior; report only results that were actually observed. Follow the catalog contribution guide to make the tool discoverable.</p>{link(repo_url('overview')+'/tree/main/conformance','Conformance kit','text-link')}</li></ol>
     </section>
     <section class="section two-col"><div><p class="eyebrow">A small, explicit contract</p><h2>Make the entry<br>points easy to find.</h2><p style="margin-top:24px">The descriptor points to the manifest and tells a caller how to launch the CLI. The manifest carries the tool's identity and requirements.</p><p class="note">This example assumes the package installs a my-smart-tool executable with a provider-free manifest command.</p></div><div>
       {code_box(descriptor,'smart-tool.json / example','descriptor')}
-      {code_box('uv run conformance/run.py path/to/your-smart-tool','From the specification checkout','conformance')}
+      {code_box('uv run conformance/run.py path/to/your-smart-tool','Example format check','conformance')}
       <p class="note">Conformance checks the format and reports checks it cannot perform. It does not certify output quality or replace product tests.</p>
     </div></section>
     <section class="section two-col" id="skill"><div><p class="eyebrow">Let your agent help</p><h2>One skill.<br>Find, use, build.</h2><p style="margin-top:24px">Install the Amplifier Smart Tools skill and ask your agent for a Smart Tool for your task. It reads the catalog, installs the tool, follows the tool's own help, and can scaffold a new tool when none fits.</p></div><div class="callout"><h3>Install the skill.</h3>{code_box(SKILL_INSTALL,'Terminal','install')}<p class="note">This installs guidance for your agent, not the tools or their credentials.</p>{link(repo_url('overview')+SKILL_PATH,'Read the skill','text-link')}</div></section>
@@ -140,26 +144,39 @@ def tool_page(config, args):
 
 
 def catalog(config, args, root):
-    import yaml
+    categories, listings = load_catalog_metadata(root)
     entries = []
+    catalog_entries = []
     platforms = set()
-    for source in sorted((root/'tools').glob('*/source.json')):
+    for source in catalog_sources(root):
         slug = source.parent.name
-        pointer = json.loads(source.read_text())
+        pointer = validate_pointer(read_json(source, root))
         repo = safe_url(pointer['repository']).removesuffix('.git')
-        manifest = source.parent/'SMART_TOOL.md'
-        provenance = source.parent/'provenance.json'
         description = 'No manifest snapshot is available yet. Inspect the source repository for current guidance.'
-        meta, prov = {}, {}
-        if manifest.exists() and provenance.exists():
-            raw = manifest.read_text()
-            if not raw.startswith('---\n'):
-                raise ValueError(f'{slug}: missing YAML front matter')
-            meta = yaml.safe_load(raw.split('---',2)[1])
-            if not isinstance(meta, dict) or not isinstance(meta.get('description'), str):
-                raise ValueError(f'{slug}: invalid manifest description')
+        meta, prov = read_snapshot(source.parent, root)
+        if meta:
             description = meta['description'].strip()
-            prov = json.loads(provenance.read_text())
+        listing = listings.get(slug)
+        state = recommendation_state(pointer, prov, listing, bool(meta))
+        category = categories[listing['category']] if listing else None
+        classification = ''
+        featured_classification = ''
+        if categories is not None:
+            badge = ''
+            if state == 'recommended':
+                badge = '<span class="recommendation recommended">Recommended</span>'
+            elif state == 'needs-review':
+                badge = '<span class="recommendation needs-review">Recommendation needs review</span>'
+            category_label = (
+                html.escape(category["label"], quote=True)
+                if category else "Other")
+            category_markup = (
+                f'<div class="catalog-category"><span>Category: {category_label}</span>')
+            classification = f'{category_markup}{badge}</div>'
+            featured_classification = (
+                f'{category_markup}{"" if state == "recommended" else badge}</div>')
+        else:
+            featured_classification = classification
         tool_platforms = meta.get('platforms', [])
         if not isinstance(tool_platforms, list) or not all(isinstance(p,str) for p in tool_platforms):
             raise ValueError(f'{slug}: invalid platforms')
@@ -182,12 +199,147 @@ def catalog(config, args, root):
             detail = f'<details><summary>Full description and source</summary><p>{esc(description)}</p><p>Manifest name: {esc(name)}</p><ul>{"".join("<li>"+esc(u)+"</li>" for u in use_cases)}</ul><p>Snapshot refreshed: {esc(prov["last_success"])}</p><p>Source commit: <code>{esc(commit)}</code></p><p>Ref: {esc(prov["source"]["ref"])} / Path: {esc(prov["source"]["path"])}</p></details>'
         showcase = next((key for key,p in PAGES.items() if repo == repo_url(key) and key not in ('overview','catalog')),None)
         launch = link(page_url(showcase,args),'Explore tool') if showcase else ''
-        search = esc(' '.join([str(name),description,*use_cases,*tool_platforms]).lower())
+        search_values = [str(name), description, *use_cases, *tool_platforms]
+        if categories is not None:
+            category_label = category['label'] if category else 'Other'
+            search_values = [str(name), display_name, description, *use_cases,
+                             *tool_platforms, category_label]
+        search = esc(' '.join(search_values).lower())
         tags = ''.join('<span class="tag">'+esc(p)+'</span>' for p in tool_platforms)
-        entries.append(f'<article class="catalog-card" data-tool="{esc(slug)}" data-platforms="{esc(" ".join(tool_platforms))}" data-search="{search}"><h2>{esc(display_name)}</h2><p>{esc(excerpt)}</p><div class="tool-meta">{tags}</div>{detail}<div class="card-links">{launch}{link(repo,"Repository")}{manifest_link}</div></article>')
+        category_attr = (
+            f' data-category="{esc(listing["category"] if listing else "")}"'
+            f' data-recommended="{str(state == "recommended").lower()}"'
+            f' data-name="{esc(display_name)}"'
+            if categories is not None else '')
+        card_start = (
+            f'<article class="catalog-card" data-tool="{esc(slug)}" '
+            f'data-platforms="{esc(" ".join(tool_platforms))}" '
+            f'data-search="{search}"{category_attr}><h2>{esc(display_name)}</h2>')
+        card_end = (
+            f'<p>{esc(excerpt)}</p><div class="tool-meta">{tags}</div>{detail}'
+            f'<div class="card-links">{launch}{link(repo,"Repository")}'
+            f'{manifest_link}</div></article>')
+        card = f'{card_start}{classification}{card_end}'
+        featured_card = f'{card_start}{featured_classification}{card_end}'
+        entries.append((state != 'recommended', slug, card))
+        catalog_entries.append((state == 'recommended', slug,
+                                listing['category'] if listing else '',
+                                card, featured_card))
+    entries = [card for _, _, card in sorted(entries)]
+    if categories is not None:
+        return catalog_browsing_layout(entries, catalog_entries, platforms, categories, args)
     options = ''.join(f'<option value="{esc(p)}">{esc(p)}</option>' for p in sorted(platforms))
+    category_control, category_details, recommendation_filter, recommendation_guide = '', '', '', ''
+    empty_hint = 'Try a broader term or another platform.'
+    if categories is not None:
+        category_options = ''.join(
+            f'<option value="{esc(identity)}">{html.escape(category["label"], quote=True)}</option>'
+            for identity, category in sorted(categories.items()))
+        category_control = (
+            '<div class="category-field"><label for="category">Primary category</label>'
+            '<select id="category">'
+            f'<option value="">All categories</option>{category_options}'
+            '<option value="__unclassified__">Other</option></select></div>')
+        scopes = ''.join(
+            f'<dt>{html.escape(category["label"], quote=True)}</dt>'
+            f'<dd>{html.escape(category["scope"], quote=True)}</dd>'
+            for _, category in sorted(categories.items()))
+        category_details = (
+            '<details class="category-scopes" id="category-scopes">'
+            f'<summary>Category labels and scopes</summary><dl>{scopes}</dl></details>')
+        recommendation_guide = (
+            '<section class="recommendation-guide" aria-labelledby="recommendation-guide-title">'
+            '<h2 id="recommendation-guide-title">What does Recommended mean?</h2>'
+            '<ul>'
+            '<li>Catalog maintainers selected this tool as a preferred starting point for its '
+            'category at the recorded source revision. Selection is not certification or a '
+            'claim that specification conformance or task outcomes were checked. Any review '
+            'results and scope limitations are stated only when recorded; a snapshot refresh '
+            'does not renew the designation.</li>'
+            '<li>Compare documented capabilities, platform support, and prerequisites with '
+            'your task first. Recommended is a preference, not an override; consider other '
+            'options.</li>'
+            '<li>Unclassified or undesignated tools are not a negative quality judgment. '
+            '“Recommended only” is optional and starts unchecked, so all tools remain '
+            'visible by default.</li>'
+            '</ul></section>')
+        empty_hint = 'Try a broader term, another platform, or another category.'
+        empty_state = (
+            '<div id="empty-results" class="empty" hidden><h3 id="empty-title">No matching tools.</h3>'
+            f'<p id="empty-hint">{empty_hint}</p>'
+            '<button id="clear-filters" class="button" type="button">Clear all filters</button></div>')
+    else:
+        empty_state = (
+            f'<div id="empty-results" class="empty" hidden><h3>No matching tools.</h3><p>{empty_hint}</p>'
+            '<button id="clear-filters" class="button">Clear filters</button></div>')
     return f'''<section class="hero catalog-hero"><p class="eyebrow">Amplifier Smart Tools / Catalog</p><h1>Find a tool.<br>Make something happen.</h1><p class="lede">Domain expertise you can put to work. Explore the tools, inspect their requirements, and bring the right one to your agent.</p><div class="actions">{link('#discovery','Get the skill','button primary')}{link(repo_url('catalog')+'#contributing','Add a tool','text-link')}</div></section>
-    <section aria-label="Browse smart tools"><div class="filters"><div class="search-field"><label for="tool-search">Search tools and use cases</label><input id="tool-search" type="search" placeholder="Try video, research, or presentations" autocomplete="off"></div><div><label for="platform">Declared platform</label><select id="platform"><option value="">All platforms</option>{options}</select></div></div><p class="catalog-count" id="result-count" role="status">{len(entries)} tools</p><noscript><p>Search requires JavaScript. All tools are listed below.</p></noscript><div class="catalog-grid">{''.join(entries)}</div><div id="empty-results" class="empty" hidden><h3>No matching tools.</h3><p>Try a broader term or another platform.</p><button id="clear-filters" class="button">Clear filters</button></div><p class="catalog-note">Descriptions and declared platforms come from the tools' own manifest snapshots. A listing does not establish installation or usability in your environment. Expand an entry to inspect its source revision and refresh time.</p></section>
+    <section aria-label="Browse smart tools"><div class="filters"><div class="search-field"><label for="tool-search">Search tools and use cases</label><input id="tool-search" type="search" placeholder="Try video, research, or presentations" autocomplete="off"></div><div><label for="platform">Declared platform</label><select id="platform"><option value="">All platforms</option>{options}</select></div>{category_control}{recommendation_filter}</div>{category_details}{recommendation_guide}<p class="catalog-count" id="result-count" role="status">{len(entries)} tools</p><noscript><p>Search requires JavaScript. All tools are listed below.</p></noscript><div class="catalog-grid">{''.join(entries)}</div>{empty_state}<p class="catalog-note">Descriptions and declared platforms come from the tools' own manifest snapshots. A listing does not establish installation or usability in your environment. Expand an entry to inspect its source revision and refresh time.</p></section>
+    <section class="section two-col" id="discovery"><div><p class="eyebrow">Let your agent help</p><h2>One skill.<br>The whole catalog.</h2><p style="margin-top:24px">Ask your agent to find a Smart Tool for your task. It can inspect the manifest, check the local environment, and follow the selected tool's own guidance.</p></div><div class="callout"><h3>Install the skill.</h3>{code_box(SKILL_INSTALL,'Terminal','install')}<p class="note">This installs guidance for your agent, not the tools or their credentials.</p>{link(repo_url('overview')+SKILL_PATH,'Read the skill','text-link')}</div></section>'''
+
+
+def catalog_browsing_layout(entries, catalog_entries, platforms, categories, args):
+    """Render a shared filter bar above separate recommendation and ordinary results."""
+
+    def tool_count(count):
+        return f'{count} tool' if count == 1 else f'{count} tools'
+
+    ordered = sorted(catalog_entries, key=lambda item: (not item[0], item[1]))
+    recommended = [item for item in ordered if item[0]]
+    all_tools = ordered
+    other_by_category = {identity: [] for identity in categories}
+    unclassified = []
+    for is_recommended, slug, identity, card, featured_card in ordered:
+        if identity in other_by_category:
+            other_by_category[identity].append(card)
+        else:
+            unclassified.append(card)
+
+    platforms_html = ''.join(
+        f'<option value="{esc(platform)}">{esc(platform)}</option>'
+        for platform in sorted(platforms))
+    category_options = ''.join(
+        f'<option value="{esc(identity)}">'
+        f'{html.escape(category["label"], quote=True)}</option>'
+        for identity, category in sorted(categories.items(),
+                                         key=lambda item: item[1]['label'].casefold()))
+    category_options = '<option value="">All categories</option>' + category_options
+    if unclassified:
+        category_options += (
+            '<option value="__unclassified__">'
+            'Other</option>')
+
+    groups = []
+    for identity, category in sorted(categories.items(),
+                                     key=lambda item: item[1]['label'].casefold()):
+        cards = other_by_category[identity]
+        if not cards:
+            continue
+        safe_id = esc(identity)
+        label = html.escape(category['label'], quote=True)
+        groups.append(
+            f'<section class="catalog-group" id="category-group-{safe_id}" '
+            f'data-category-group="{safe_id}" aria-labelledby="category-heading-{safe_id}">'
+            f'<h3 id="category-heading-{safe_id}"><span>{label}</span>'
+            f'<span class="group-count" id="category-group-count-{safe_id}">{tool_count(len(cards))}'
+            f'</span></h3><div class="catalog-grid">{"".join(cards)}</div></section>')
+    if unclassified:
+        groups.append(
+            '<section class="catalog-group" id="category-group-unclassified" '
+            'data-category-group="__unclassified__" aria-labelledby="category-heading-unclassified">'
+            '<h3 id="category-heading-unclassified"><span>Other</span>'
+            f'<span class="group-count" id="category-group-count-unclassified">{tool_count(len(unclassified))}'
+            f'</span></h3><div class="catalog-grid">{"".join(unclassified)}</div></section>')
+
+    all_count = tool_count(len(entries))
+    tools_empty = (
+        '<p class="tools-empty" id="other-empty" hidden>'
+        'No tools match these filters.</p>'
+        if recommended else '')
+    return f'''<section class="hero catalog-hero"><p class="eyebrow">Amplifier Smart Tools / Catalog</p><h1>Find a tool.<br>Make something happen.</h1><p class="lede">Domain expertise you can put to work. Explore the tools, inspect their requirements, and bring the right one to your agent.</p><div class="actions">{link('#discovery','Get the skill','button primary')}{link(repo_url('catalog')+'#contributing','Add a tool','text-link')}</div></section>
+    <section class="catalog-browser" aria-label="Browse smart tools"><div class="filters" id="catalog-filters" hidden><div class="search-field"><label for="tool-search">Search</label><input id="tool-search" type="search" placeholder="Search tools or categories" autocomplete="off"></div><div class="category-field"><label for="category">Category</label><select id="category">{category_options}</select></div><div><label for="platform">Platform</label><select id="platform"><option value="">All platforms</option>{platforms_html}</select></div><div class="sort-field"><label for="tool-sort">Sort by</label><select id="tool-sort"><option value="category">Category</option><option value="name">Name</option></select></div><button id="clear-filters" class="button clear-filters" type="button">Clear filters</button></div><p class="catalog-count" id="result-count" role="status">{all_count}</p><p class="empty-results" id="empty-results"{' hidden' if entries else ''}>No matching tools.</p><noscript><p class="no-script-note">All tools are listed below.</p></noscript>
+    <section class="recommendation-region" id="recommended-region" aria-labelledby="recommended-heading"{' hidden' if not recommended else ''}><div class="catalog-section-heading"><h2 id="recommended-heading">Recommended</h2><span class="catalog-count" id="recommended-count">{tool_count(len(recommended))}</span></div><div class="catalog-grid" id="recommended-tools">{''.join(item[4] for item in recommended)}</div></section>
+    <section class="other-tools-region" id="other-tools" aria-labelledby="other-tools-heading"><div class="catalog-section-heading"><h2 id="other-tools-heading">All tools</h2><span class="catalog-count" id="other-count">{tool_count(len(all_tools))}</span></div>{tools_empty}<div id="other-tool-groups"><div class="catalog-grid" id="other-tools-by-name" hidden></div>{''.join(groups)}</div></section>
+    <p class="catalog-note">Descriptions and declared platforms come from the tools' own manifest snapshots. A listing does not establish installation or usability in your environment. Expand an entry to inspect its source revision and refresh time.</p></section>
     <section class="section two-col" id="discovery"><div><p class="eyebrow">Let your agent help</p><h2>One skill.<br>The whole catalog.</h2><p style="margin-top:24px">Ask your agent to find a Smart Tool for your task. It can inspect the manifest, check the local environment, and follow the selected tool's own guidance.</p></div><div class="callout"><h3>Install the skill.</h3>{code_box(SKILL_INSTALL,'Terminal','install')}<p class="note">This installs guidance for your agent, not the tools or their credentials.</p>{link(repo_url('overview')+SKILL_PATH,'Read the skill','text-link')}</div></section>'''
 
 

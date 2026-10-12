@@ -28,17 +28,11 @@ shared preview directory named after its repository, then serve that directory.
 
 ## GitHub Pages
 
-The Website workflow builds an artifact for relevant pull requests. On main,
-relevant pushes build and publish automatically. A successful completion of
-Refresh Amplifier Smart Tools manifests on main also triggers a build and publish
-from current main, including snapshot commits made by the refresh bot. Pull
-requests never deploy. Failed refresh runs do not trigger publication.
+The Website workflow builds a `github-pages` artifact for relevant pull requests and retains it for seven days. See the root [preview instructions](../README.md#review-a-website-preview) for downloading the exact run's `artifact.tar` and serving the static build. Pull requests never deploy.
 
-One-time repository setup: enable GitHub Pages with GitHub Actions as its source
-and allow main in the github-pages environment. After this workflow is merged,
-ongoing catalog changes and successful nightly refreshes publish automatically.
-The manual Website action remains available for explicit branch publication.
-All linked family sites must be published before cross-site navigation is live.
+On main, relevant pushes build and publish automatically. Either success or failure of a trusted Refresh Amplifier Smart Tools manifests run on main also triggers a validated build and publish from current main, including successful entry updates committed during a partially failed refresh. The workflow never consumes triggering-run code or artifacts. Metadata validation belongs to the canonical renderer and is also run by CI through `scripts/validate_catalog.py`.
+
+The existing GitHub Actions Pages setup and main environment policy remain unchanged. Manual publication is restricted to main; other revisions are preview-only. All linked family sites must be published before cross-site navigation is live.
 
 ## Shared identity
 
@@ -69,3 +63,32 @@ The overview illustration has a pause control that also pauses its title mark. R
 preferences select the still image by default. Shared media lives in
 `site/theme/assets/` and is included by the theme sync script. The original briefs
 and generation provenance live in `amplifier-smart-tools/site/artwork/`.
+
+## Catalog categories and Recommended
+
+The catalog uses the flat `categories.json` taxonomy and each listing's optional
+primary `category`. Keep category IDs stable and expose labels and scopes without
+turning categories into a hierarchy. Ordinary listings and tools without classification remain available.
+
+Submissions are source-only and category-agnostic: submitters do not add, choose, or create categories or recommendations and need not know category definitions. Maintainers assign classification from the approved registry in separate metadata, never upstream manifests or source pointers. Category additions, label changes, and scope changes require their separate review and approval. A maintainer-owned ordinary listing is `{"category": "approved-id"}`. The required category must be known; optional `recommended` defaults to false in a normalized copy in memory without mutating input or rewriting files. A provided flag must be a strict boolean. True requires the full selected `reviewed_source`; false or omission prohibits it.
+
+Each card shows its “Category: {label}” prefix. Effective recommendations use a plain, noninteractive “Recommended” badge; designations needing review retain the separate “Recommendation needs review” badge. Ordinary listings have no recommendation-status badge. Cards without listings show “Category: Other.” Other is a built-in fallback grouping, not a registry category. Tools without classification automatically appear there and remain searchable by Name and Category. They remain readable without snapshots or JavaScript.
+
+The current data classifies all 22 tools across nine categories: two effective recommendations, 20 ordinary listings, and zero unclassified tools. The seven category additions and assignments are proposed for maintainer review, not already approved. See the root [category table](../README.md#categories-and-recommendations) for coverage; category scopes remain in `categories.json`. Missing classification is still valid for future source-pointer contributions, not an expected gap in the current 22-tool inventory.
+
+Explain “Recommended” as a maintainer-curated preference for a category at a selected recorded source revision under the [maintainer guide](../docs/maintainers.md). It is not certification, guaranteed outcomes, or proof of local readiness. Catalog metadata tests do not establish tool quality or completed evaluation.
+
+Keep Recommended separate from All tools. Render each effective recommendation once in the Recommended region as a shortcut and once in All tools; its category label remains on both cards, but the featured shortcut uses the section heading instead of a redundant “Recommended” badge. All tools includes all 22 unique listings, so the two regions render 24 card instances in total. Hide the entire Recommended region when its effective matching count is zero, including on the initial no-JavaScript page when no designation is effective. Do not render a Recommended empty-state message, recommendation-specific details disclosure, or explanation link. The badge is static text, not a control. Existing optional “Full description and source” details retain source provenance and refresh information.
+
+Show the selected recorded revision separately from snapshot provenance and refresh time. Retain the `reviewed_source` field name for schema compatibility: it records selected source identity, not proof of conformance or task results. Source drift removes recommendation preference without removing the category or listing. The stale designation still occupies its category's slot. Digital Twin Universe and Smart Tool Creator are effective recommendations for Test environments and Smart Tool development respectively.
+
+Render the two effective recommendation shortcuts in Recommended before All tools, and also include both listings in the complete All tools list. Group all 22 unique listings, including the recommendations, into their populated categories; do not create empty category groups. Keep every card's category label. Search matches displayed tool names and category labels.
+
+Use one control bar above all results: Search, Category, Platform, Sort by (Category or Name), and one Clear filters action. Search, category, and platform filter both copies; sorting changes All tools only. Do not display category scope text or insert it on selection; keep scope metadata in the registry. Include the Other option and group only when an entry lacks classification; neither appears for the current 22 classified tools. At phone widths, Search spans a row, Category and Platform share a two-column row, and Sort by and Clear filters share the next row. Keep the native selects at a stable height and min-width 0; keep Clear filters at least 44px tall. The `tool-sort` select defaults to Category. Name places all 22 unique listings in one globally alphabetical list; Category restores their category groups. Recommended remains separate in either mode, and clearing filters preserves the selected sort.
+
+All filter controls remain hidden without JavaScript so all 22 unique listings stay visible in All tools, alongside the two featured shortcuts (24 rendered cards). The global and All tools counts report unique listings, not rendered card instances. The category headings are noninteractive and there is no separate category-navigation panel.
+
+Keep review evidence free of credentials and private details. Preserve public
+source URLs and exact generated manifests. Implement shared rendering and
+metadata changes in the canonical theme, then sync; never patch the vendored
+copy independently.

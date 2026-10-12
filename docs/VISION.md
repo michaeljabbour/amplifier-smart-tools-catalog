@@ -14,8 +14,8 @@ connects a small catalog to the tools' own descriptions. The person uses the sam
 in local Codex, Claude Code, GitHub Copilot CLI, and Amplifier sessions.
 Host permissions and execution environments remain visible differences.
 
-Catalog maintainers contribute a source pointer in a folder for each tool.
-The pointer identifies a repository, a revision, and a location inside it.
+Contributors submit only a source pointer in a folder for each tool. Submissions are category-agnostic: submitters do not add, choose, or create categories or recommendations and need not know category definitions. Listing or contributing is not a recommendation nomination.
+The pointer identifies a repository, a revision, and a location inside it. Maintainers assign classification from the approved registry in separate metadata, never in upstream manifests or source pointers. A category-only listing defaults to not recommended without rewriting its file. Tools without classification automatically appear under Other and remain searchable by Name and Category; Other is a built-in fallback grouping, not a registry category. Recommendation curation is separate: only catalog maintainers select tools, categories, and source revisions and initiate designations, renewals, replacements, and withdrawals. Contributors or agents implement explicit maintainer decisions, not creator promotion requests. Category additions, labels, and scopes require separate maintainer review and approval.
 Tool authors own the manifest that explains when to select their tool and the
 help that explains how to invoke it.
 
@@ -55,6 +55,14 @@ difference, including the boundary between ordinary and model-backed commands.
 Repository content cannot authorize installation, spending, or changes to the
 person's environment. The host's authorization rules remain in force.
 
+### 6. **Recommendation is curated and revision-scoped.**
+
+Recommendation is maintainer-curated preference at a selected recorded source revision, not certification, guaranteed outcomes, or local readiness. The schema-compatible `reviewed_source` field records selected source identity, not proof of conformance or task results. Metadata checks establish structure and source binding, not tool quality. The [maintainer guide](maintainers.md#evaluation-practice) suggests reviewing stability, conformance, and useful outcomes; actual checks are recorded separately only when run, not required to implement an explicit maintainer selection. The taxonomy is flat, IDs are stable, each listing has at most one primary category, and each category has at most one designation, including stale ones. Source drift removes preference until deliberate maintainer renewal.
+
+### 7. **Selection and validation remain distinct.**
+
+Selection records describe maintainer decisions without claiming completed validation. Evaluation records, when checks are run, describe actual results and limitations and keep credentials and private details out of public evidence. Public source repository URLs and exact upstream snapshots remain traceable and unchanged.
+
 ## What this deliberately resists
 
 - Per-tool skills and independently written or maintained manifest copies.
@@ -74,4 +82,7 @@ person's environment. The host's authorization rules remain in force.
 
 ## Changelog
 
-- First draft from the reviewed catalog design and the steward's decisions.
+- Initial draft of the catalog's folder-based discovery and source ownership principles.
+- 2026-10-09: Clarify role-based maintainer curation, evidence required before promotion, and category terminology.
+- 2026-10-12: Separate maintainer-curated preference from validation evidence; source binding identifies a selected revision but does not demonstrate conformance or task outcomes.
+- 2026-10-12: Keep submissions source-only and category-agnostic; maintainer-owned classification uses an omitted recommendation default and a searchable Other fallback without changing the taxonomy.
